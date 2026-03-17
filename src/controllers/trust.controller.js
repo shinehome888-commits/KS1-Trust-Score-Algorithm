@@ -1,100 +1,88 @@
 const TrustScore = require('../models/TrustScore.model');
-const { calculateTrustScore } = require('../services/scoreEngine.service');
 
-// Recalculate trust score after event
 const recalculateTrustScore = async (req, res) => {
   try {
     const { smeId, eventType, eventData } = req.body;
-
-    if (!smeId) {
-      return res.status(400).json({ message: 'smeId required' });
+    if (!smeId || !eventType) {
+      return res.status(400).json({ message: 'smeId and eventType required' });
     }
 
-    // Get or create record
-    let trust = await TrustScore.findOne({ smeId });
-    if (!trust) {
-      trust = new TrustScore({ smeId });
+    let scoreDoc = await TrustScore.findOne({ smeId });
+    if (!scoreDoc) {
+      scoreDoc = new TrustScore({ smeId, trustScore: 50, completedTransactions: 0, disputesCount: 0, tradeVolume: 0 });
     }
 
-    // Update based on event type
     switch (eventType) {
-      case 'transaction.completed':
-        trust.completedTransactions += 1;
-        trust.tradeVolume += eventData.amount || 0;
+      case 'kyc.verified':
+        scoreDoc.trustScore = Math.min(100, scoreDoc.trustScore + 15);
         break;
-      case 'transaction.failed':
-        trust.failedTransactions += 1;
+      case 'transaction.completed':
+        const amount = eventData.amount || 0;
+        scoreDoc.completedTransactions += 1;
+        scoreDoc.tradeVolume += amount;
+        scoreDoc.trustScore = Math.min(100, scoreDoc.trustScore + 5);
         break;
       case 'dispute.opened':
-        trust.disputesCount += 1;
+        scoreDoc.disputesCount += 1;
+        scoreDoc.trustScore = Math.max(0, scoreDoc.trustScore - 10);
         break;
-      case 'kyc.verified':
-        trust.kycStatus = true;
-        break;
-      default:
-        return res.status(400).json({ message: 'Unknown event type' });
     }
 
-    // Recalculate score
-    const { score, tier } = calculateTrustScore({
-      completedTransactions: trust.completedTransactions,
-      failedTransactions: trust.failedTransactions,
-      disputesCount: trust.disputesCount,
-      tradeVolume: trust.tradeVolume,
-      kycStatus: trust.kycStatus
-    });
+    // Update tier
+    if (scoreDoc.trustScore >= 80) scoreDoc.trustTier = 'Platinum';
+    else if (scoreDoc.trustScore >= 70) scoreDoc.trustTier = 'Gold';
+    else if (scoreDoc.trustScore >= 60) scoreDoc.trustTier = 'Silver';
+    else scoreDoc.trustTier = 'Bronze';
 
-    trust.trustScore = score;
-    trust.trustTier = tier;
-    trust.lastUpdated = new Date();
-
-    await trust.save();
-
-    // Log high performers
-    if (score >= 90) {
-      console.log(`🌟 PLATINUM TRUST: ${smeId} | Tier: ${tier} | Score: ${score}`);
-    }
-
-    res.json({ success: true, score, tier, smeId });
+    await scoreDoc.save();
+    res.json({ success: true, trustScore: scoreDoc.trustScore, trustTier: scoreDoc.trustTier });
   } catch (err) {
-    console.error('Trust Score Error:', err.message);
-    res.status(500).json({ message: 'Internal server error' });
+    console.error('Recalculate error:', err.message);
+    res.status(500).json({ message: 'Server error' });
   }
 };
 
-// Get current trust score
 const getTrustScore = async (req, res) => {
   try {
-    const trust = await TrustScore.findOne({ smeId: req.params.smeId });
-    if (!trust) {
-      return res.status(404).json({ message: 'SME not found' });
+    const score = await TrustScore.findOne({ smeId: req.params.smeId });
+    if (!score) {
+      return res.json({ smeId: req.params.smeId, trustScore: 50, trustTier: 'Bronze' });
     }
-    res.json({
-      smeId: trust.smeId,
-      trustScore: trust.trustScore,
-      trustTier: trust.trustTier,
-      lastUpdated: trust.lastUpdated
-    });
+    res.json(score);
   } catch (err) {
-    res.status(500).json({ message: 'Internal server error' });
+    res.status(500).json({ message: 'Server error' });
   }
 };
 
-// Get trust tier only
-const getTrustTier = async (req, res) => {
+const getLeaderboard = async (req, res) => {
   try {
-    const trust = await TrustScore.findOne({ smeId: req.params.smeId });
-    if (!trust) {
-      return res.status(404).json({ message: 'SME not found' });
-    }
-    res.json({ smeId: trust.smeId, trustTier: trust.trustTier });
+    const top = await TrustScore.find()
+      .sort({ trustScore: -1 })
+      .limit(5)
+      .select('smeId trustScore trustTier businessName');
+    res.json(top);
   } catch (err) {
-    res.status(500).json({ message: 'Internal server error' });
+    res.status(500).json([]);
+  }
+};
+
+// ✅ STATS ENDPOINT
+const getStats = async (req, res) => {
+  try {
+    const scores = await TrustScore.find().select('trustScore');
+    const avg = scores.length 
+      ? parseFloat((scores.reduce((sum, s) => sum + s.trustScore, 0) / scores.length).toFixed(1))
+      : 50;
+    res.json({ average: avg });
+  } catch (err) {
+    console.error('Trust stats error:', err.message);
+    res.status(500).json({ average: 50 });
   }
 };
 
 module.exports = {
   recalculateTrustScore,
   getTrustScore,
-  getTrustTier
+  getLeaderboard,
+  getStats
 };
