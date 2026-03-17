@@ -5,6 +5,6 @@ const trustController = require('../controllers/trust.controller');
 router.post('/recalculate', trustController.recalculateTrustScore);
 router.get('/score/:smeId', trustController.getTrustScore);
 router.get('/leaderboard', trustController.getLeaderboard);
-router.get('/stats', trustController.getStats); // 👈 STATS ENDPOINT
+router.get('/stats', trustController.getStats); // ← calls controller function
 
 module.exports = router;
