@@ -1,14 +1,10 @@
 const express = require('express');
-const { 
-  recalculateTrustScore,
-  getTrustScore,
-  getTrustTier
-} = require('../controllers/trust.controller');
-
 const router = express.Router();
+const trustController = require('../controllers/trust.controller');
 
-router.post('/recalculate', recalculateTrustScore);
-router.get('/score/:smeId', getTrustScore);
-router.get('/tier/:smeId', getTrustTier);
+router.post('/recalculate', trustController.recalculateTrustScore);
+router.get('/score/:smeId', trustController.getTrustScore);
+router.get('/leaderboard', trustController.getLeaderboard);
+router.get('/stats', trustController.getStats); // 👈 STATS ENDPOINT
 
 module.exports = router;
