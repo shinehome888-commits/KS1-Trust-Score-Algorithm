@@ -1,25 +1,38 @@
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
-const dotenv = require('dotenv');
-
-dotenv.config();
-require('./config/db');
-
 const app = express();
 
 app.use(helmet());
-app.use(cors({ origin: /\.onrender\.com$/ }));
+app.use(cors());
 app.use(express.json());
 
-// ✅ Mount trust routes under /api/trust
-app.use('/api/trust', require('./routes/trust.routes'));
+async function authenticateToken(req, res, next) {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) return res.status(401).json({ error: 'Access denied. No token.' });
 
-app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'OK' });
+  try {
+    const response = await fetch('https://ks1-central-auth.onrender.com/auth/verify', {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!response.ok) return res.status(401).json({ error: 'Invalid token' });
+    const user = await response.json();
+    req.user = user;
+    next();
+  } catch (err) {
+    console.error('Auth verification failed:', err);
+    res.status(500).json({ error: 'Auth service unavailable' });
+  }
+}
+
+app.use('/api', authenticateToken);
+
+// Trust score route
+app.get('/api/trust/score/:smeId', (req, res) => {
+  res.json({ trustScore: 65 });
 });
 
-const PORT = process.env.PORT || 10000;
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`[KS1 TRUST] Running on port ${PORT}`);
+const PORT = process.env.PORT || 3003;
+app.listen(PORT, () => {
+  console.log(`✅ KS1 Trust Score running on port ${PORT}`);
 });
